@@ -29,6 +29,20 @@ Windows Actions 产物 `mcdk-windows-x64.zip` 必须同时包含：
 
 ## 部署顺序
 
+推荐先使用仓库内的 Windows 部署脚本预演。脚本兼容 GitHub 下载的外层 artifact ZIP，以及其中实际打包产物的内层 ZIP；默认只显示文件、哈希、备份位置和阻塞进程，不修改目标：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/scripts/deploy_rcm_artifact.ps1 `
+  -ArtifactZip "D:\Downloads\mcdk-windows-x64.zip" `
+  -McdkTarget "C:\path\to\_engine\.tools\mc_modbg\mcdk.exe" `
+  -BridgeTarget "C:\path\to\mcdk_mcp_hub\mcdk_stdio_bridge.exe" `
+  -VersionLabel "<commit>"
+```
+
+确认预演结果后关闭全部实例，并在同一命令末尾增加 `-Apply`。脚本会在 bridge 同级的 `backups` 目录创建带时间和版本标识的备份，先校验暂存文件哈希，再成对替换；任一替换或校验失败时恢复两个旧文件。
+
+手工部署时遵循同样顺序：
+
 1. 关闭所有由 MCDK 启动的 Minecraft 实例。
 2. 确认没有正在运行的 `mcdk.exe` 和 `mcdk_stdio_bridge.exe`。
 3. 用同一份 Actions 产物中的 `mcdk.exe` 替换引擎工具目录中的版本。
