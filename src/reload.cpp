@@ -16,6 +16,7 @@
 #include <chrono>
 #include <mutex>
 #include <atomic>
+#include <utility>
 
 namespace MCDevTool::HotReload {
 

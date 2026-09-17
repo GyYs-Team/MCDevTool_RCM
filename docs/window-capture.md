@@ -1,11 +1,11 @@
 # Minecraft 窗口截图
 
-`Style::captureMinecraftWindow480p` 使用 Windows.Graphics.Capture（WGC）按 HWND 捕获窗口，通过 D3D11 读回客户区像素，再使用 WIC 缩放、编码 JPEG。
+`Style::captureMinecraftWindow` 使用 Windows.Graphics.Capture（WGC）按 HWND 捕获窗口，通过 D3D11 读回客户区像素，再使用 WIC 编码 JPEG。`CaptureResolution::Preview` 输出最高 480p 的预览图，`CaptureResolution::Full` 保留客户区原始像素；旧的 `captureMinecraftWindow480p` 接口继续等价于预览模式。
 
 - 仅使用 WGC，不调用 `PrintWindow`、`BitBlt`，不要求游戏响应 GDI 绘制消息。
 - 支持窗口被其他窗口遮挡；不会主动置顶、激活或恢复游戏窗口。
 - 按物理像素裁剪客户区，排除标题栏和边框，与点击接口的客户区坐标保持一致。
-- 保持宽高比，高度最多 480 像素，小窗口不放大，JPEG 质量为 75%。
+- 预览模式保持宽高比，高度最多 480 像素，小窗口不放大；全分辨率模式不缩放。两种模式的 JPEG 质量均为 75%。
 - 内部使用独立 MTA 线程及 `CreateFreeThreaded` 帧池，调用线程不需要 WinRT 初始化或消息循环。
 - 首次捕获时将 WGC 工厂所在的实现模块固定到进程退出，避免最后一个 MTA 注销后，后台任务执行已卸载 DLL 中的代码。帧、会话、设备和线程仍按每次请求正常释放；模块固定使用 Win32 的 `GET_MODULE_HANDLE_EX_FLAG_PIN`，不依赖延时等待。
 - 窗口尺寸变化时重建帧池；取帧最多等待 3 秒。窗口不存在、最小化、捕获不可用或失败时返回 `std::nullopt`。
@@ -21,7 +21,9 @@
 
 开启 `MC_DEV_TOOL_BUILD_TEST` 后，构建并运行 `window_capture_test`。该测试需要交互式桌面，会短暂创建 OpenGL 窗口和遮挡窗口；不注册为默认 CTest 用例。
 
-测试使用 `SwapBuffers` 提交红蓝画面，并解码 JPEG 校验尺寸和像素，覆盖完全遮挡、重复截图、尺寸变化、无标题栏、最小化和无效 PID，也检查捕获没有发送 `WM_PRINT` / `WM_PRINTCLIENT`。
+测试使用 `SwapBuffers` 提交红蓝画面，并解码 JPEG 校验尺寸和像素，覆盖 480p 预览、全分辨率、完全遮挡、重复截图、尺寸变化、无标题栏、最小化和无效 PID，也检查捕获没有发送 `WM_PRINT` / `WM_PRINTCLIENT`。
+
+MCP 的 `capture_game_window` 接受可选的 `resolution` 参数：`preview` 为默认值，`full` 返回当前游戏客户区的原始像素尺寸。`mc_input` 的 `capture='end'` 固定使用预览模式，避免输入操作返回过大的图片。
 
 另外在独立子进程中覆盖调用方未初始化 COM 的情况：截图返回后保持进程运行、重复捕获并检查正常退出。必须隔离进程，否则父测试中的 MTA 会掩盖 DLL 提前卸载的问题。旧实现在该测试中以 `0xC0000005` 退出。
 

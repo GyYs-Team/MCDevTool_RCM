@@ -21,6 +21,8 @@ def U32_BE(b):
 
 IPC_JSON_REQUEST_TYPE = 100
 IPC_JSON_RESPONSE_TYPE = 101
+IPC_LOG_OUTPUT_TYPE = 102
+IPC_LOG_ERROR_TYPE = 103
 
 
 def _U16_BE_BYTES(v):
@@ -58,6 +60,8 @@ class IPCSystem:
         self.sock = None
         self.mLock = threading.Lock()
         self.mSendLock = threading.Lock()
+        self.mThread = None
+        self.mStopEvent = None
         self.handers = {}
         self.jsonHandlers = {}
 
@@ -98,63 +102,93 @@ class IPCSystem:
             return False
 
     def start(self):
-        if self.sock or not self.port:
-            return
-        threading.Thread(target=self._threadListenLoop).start()
+        with self.mLock:
+            if self.sock or self.mThread or not self.port:
+                return
+            stopEvent = threading.Event()
+            thread = threading.Thread(target=self._threadListenLoop, args=(stopEvent,))
+            thread.daemon = True
+            self.mStopEvent = stopEvent
+            self.mThread = thread
+        thread.start()
 
     def close(self):
         sock = None
         with self.mLock:
+            if self.mStopEvent:
+                self.mStopEvent.set()
             sock = self.sock
             self.sock = None
         if sock:
-            sock.shutdown(socket.SHUT_RDWR)
-            sock.close()
-
-    def _threadListenLoop(self):
-        with self.mLock:
-            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock = self.sock
-        sock.connect(("localhost", self.port))
-        sock.settimeout(0.05)
-        print("[IPCSystem] 已连接到调试服务器，端口：" + str(self.port))
-        # [2B TypeID][4B DataLength][Data]
-        def _recvAll(sock, length):
-            # type: (socket.socket, int) -> bytearray
-            buf = bytearray()
-            while len(buf) < length:
-                more = sock.recv(length - len(buf))
-                if not more:
-                    raise EOFError("Socket closed before receiving all data")
-                buf.extend(more)
-            return buf
-        while 1:
             try:
-                header = _recvAll(sock, 6)
-                typeID = U16_BE(header[0:2])
-                dataLength = U32_BE(header[2:6])
-                data = _recvAll(sock, dataLength)
-            except socket.timeout:
-                continue
-            except EOFError:
-                break
-            except socket.error:
-                break
+                sock.shutdown(socket.SHUT_RDWR)
             except Exception:
-                traceback.print_exc()
-                break
-            if typeID == IPC_JSON_REQUEST_TYPE:
-                self._handleJsonRequest(data)
-            elif typeID in self.handers:
+                pass
+            try:
+                sock.close()
+            except Exception:
+                pass
+
+    def _threadListenLoop(self, stopEvent):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            sock.connect(("localhost", self.port))
+            sock.settimeout(0.05)
+            with self.mLock:
+                if stopEvent.is_set():
+                    return
+                self.sock = sock
+            print("[IPCSystem] 已连接到调试服务器，端口：" + str(self.port))
+
+            # [2B TypeID][4B DataLength][Data]
+            def _recvAll(sock, length):
+                # type: (socket.socket, int) -> bytearray
+                buf = bytearray()
+                while len(buf) < length:
+                    more = sock.recv(length - len(buf))
+                    if not more:
+                        raise EOFError("Socket closed before receiving all data")
+                    buf.extend(more)
+                return buf
+
+            while not stopEvent.is_set():
                 try:
-                    self.handers[typeID](data)
+                    header = _recvAll(sock, 6)
+                    typeID = U16_BE(header[0:2])
+                    dataLength = U32_BE(header[2:6])
+                    data = _recvAll(sock, dataLength)
+                except socket.timeout:
+                    continue
+                except EOFError:
+                    break
+                except socket.error:
+                    break
                 except Exception:
                     traceback.print_exc()
-            else:
-                print("[IPCSystem] 未知的TypeID数据包：" + str(typeID))
-        with self.mLock:
-            self.sock = None
-        print("[IPCSystem] 连接已关闭")
+                    break
+                if typeID == IPC_JSON_REQUEST_TYPE:
+                    self._handleJsonRequest(data)
+                elif typeID in self.handers:
+                    try:
+                        self.handers[typeID](data)
+                    except Exception:
+                        traceback.print_exc()
+                else:
+                    print("[IPCSystem] 未知的TypeID数据包：" + str(typeID))
+        except Exception:
+            traceback.print_exc()
+        finally:
+            with self.mLock:
+                if self.sock is sock:
+                    self.sock = None
+                if self.mThread is threading.current_thread():
+                    self.mThread = None
+                    self.mStopEvent = None
+            try:
+                sock.close()
+            except Exception:
+                pass
+            print("[IPCSystem] 连接已关闭")
 
     def _sendJsonResponse(self, requestId, ok=True, result=None, error=None):
         resp = {"id": requestId, "ok": ok}
@@ -503,14 +537,39 @@ _IPCSYSTEM.updateJsonHandlers(
     }
 )
 
+_CLIENT_ACTIVE = False
+_SERVER_ACTIVE = False
+
+
+def SEND_LOG(channel, line):
+    messageType = IPC_LOG_ERROR_TYPE if channel == "stderr" else IPC_LOG_OUTPUT_TYPE
+    return _IPCSYSTEM.sendPacket(messageType, line)
+
+
+def _CLOSE_IF_UNUSED():
+    if not _CLIENT_ACTIVE and not _SERVER_ACTIVE:
+        _IPCSYSTEM.close()
+
 def ON_CLIENT_INIT():
-    global _CL_GAME_COMP
+    global _CL_GAME_COMP, _CLIENT_ACTIVE
+    _CLIENT_ACTIVE = True
     _CL_GAME_COMP = clientApi.GetEngineCompFactory().CreateGame(clientApi.GetLevelId())
     _IPCSYSTEM.start()
 
 def ON_CLIENT_EXIT():
-    _IPCSYSTEM.close()
+    global _CL_GAME_COMP, _CLIENT_ACTIVE
+    _CLIENT_ACTIVE = False
+    _CL_GAME_COMP = None
+    _CLOSE_IF_UNUSED()
 
 def ON_SERVER_INIT():
-    global _SR_GAME_COMP
+    global _SR_GAME_COMP, _SERVER_ACTIVE
+    _SERVER_ACTIVE = True
     _SR_GAME_COMP = serverApi.GetEngineCompFactory().CreateGame(serverApi.GetLevelId())
+    _IPCSYSTEM.start()
+
+def ON_SERVER_EXIT():
+    global _SR_GAME_COMP, _SERVER_ACTIVE
+    _SERVER_ACTIVE = False
+    _SR_GAME_COMP = None
+    _CLOSE_IF_UNUSED()

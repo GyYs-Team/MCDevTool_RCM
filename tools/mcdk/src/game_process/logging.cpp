@@ -105,20 +105,18 @@ namespace mcdk::detail {
             if (line.find("[INFO][Developer]") != std::string::npos) {
                 printColoredAtomic(line, ConsoleColor::DarkGray);
                 return;
-            } else if (containsIgnoreCase(line, "SUC")) {
-                printColoredAtomic(line, ConsoleColor::Green);
-                return;
-            } else if (containsIgnoreCase(line, "ERROR")) {
-                printColoredAtomic(line, ConsoleColor::Red);
-                return;
-            } else if (containsIgnoreCase(line, "WARN")) {
-                printColoredAtomic(line, ConsoleColor::Yellow);
-                return;
-            } else if (containsIgnoreCase(line, "DEBUG")) {
-                printColoredAtomic(line, ConsoleColor::Cyan);
-                return;
             }
-            printColoredAtomic(line, ConsoleColor::Default);
+            ConsoleColor color = ConsoleColor::Default;
+            if (containsIgnoreCase(line, "SUC")) {
+                color = ConsoleColor::Green;
+            } else if (containsIgnoreCase(line, "ERROR")) {
+                color = ConsoleColor::Red;
+            } else if (containsIgnoreCase(line, "WARN")) {
+                color = ConsoleColor::Yellow;
+            } else if (containsIgnoreCase(line, "DEBUG")) {
+                color = ConsoleColor::Cyan;
+            }
+            printColoredAtomic(line, color);
             if (needLogBuffer) {
                 logBuffer->add(std::move(line));
             }
@@ -245,6 +243,10 @@ namespace mcdk::detail {
         mTracebackHandler = std::move(tracebackHandler);
     }
 
+    void SafaiaLogReceiver::setPythonLineSuppressionPredicate(std::function<bool()> predicate) {
+        mPythonLineSuppressionPredicate = std::move(predicate);
+    }
+
     std::error_code SafaiaLogReceiver::start() {
         return mService.start();
     }
@@ -367,6 +369,10 @@ namespace mcdk::detail {
     }
 
     void SafaiaLogReceiver::dispatchLine(StreamState& stream, std::string line) {
+        if (line.find("[Python] ") != std::string::npos && mPythonLineSuppressionPredicate
+            && mPythonLineSuppressionPredicate()) {
+            return;
+        }
         const bool header         = startsTraceback(line);
         const bool chainSeparator = isTracebackChainSeparator(line);
         if (header) {

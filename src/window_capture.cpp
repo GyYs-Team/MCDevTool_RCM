@@ -2,6 +2,7 @@
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
 #include "window_capture.h"
+#include "mcdevtool/style.h"
 
 #include <algorithm>
 #include <chrono>
@@ -96,19 +97,34 @@ namespace MCDevTool::Style::Detail {
             return crop;
         }
 
-        std::vector<uint8_t>
-        encodeJpeg(IWICImagingFactory* factory, IWICBitmapSource* bitmap, UINT width, UINT height) {
-            const UINT targetHeight = std::min(height, 480u);
-            const UINT targetWidth =
-                std::max(1u, static_cast<UINT>((static_cast<uint64_t>(width) * targetHeight + height / 2) / height));
+        std::vector<uint8_t> encodeJpeg(
+            IWICImagingFactory* factory,
+            IWICBitmapSource*   bitmap,
+            UINT                width,
+            UINT                height,
+            CaptureResolution   resolution
+        ) {
+            UINT targetWidth  = width;
+            UINT targetHeight = height;
             winrt::com_ptr<IWICBitmapScaler> scaler;
-            winrt::check_hresult(factory->CreateBitmapScaler(scaler.put()));
-            winrt::check_hresult(scaler->Initialize(bitmap, targetWidth, targetHeight, WICBitmapInterpolationModeFant));
+            IWICBitmapSource*                  encodeSource = bitmap;
+            if (resolution == CaptureResolution::Preview) {
+                targetHeight = std::min(height, 480u);
+                targetWidth  = std::max(
+                    1u,
+                    static_cast<UINT>((static_cast<uint64_t>(width) * targetHeight + height / 2) / height)
+                );
+                winrt::check_hresult(factory->CreateBitmapScaler(scaler.put()));
+                winrt::check_hresult(
+                    scaler->Initialize(bitmap, targetWidth, targetHeight, WICBitmapInterpolationModeFant)
+                );
+                encodeSource = scaler.get();
+            }
 
             winrt::com_ptr<IWICFormatConverter> converter;
             winrt::check_hresult(factory->CreateFormatConverter(converter.put()));
             winrt::check_hresult(converter->Initialize(
-                scaler.get(),
+                encodeSource,
                 GUID_WICPixelFormat24bppBGR,
                 WICBitmapDitherTypeNone,
                 nullptr,
@@ -212,7 +228,7 @@ namespace MCDevTool::Style::Detail {
             return bitmap;
         }
 
-        std::optional<std::vector<uint8_t>> captureOnWorker(HWND hwnd) {
+        std::optional<std::vector<uint8_t>> captureOnWorker(HWND hwnd, CaptureResolution resolution) {
             Apartment  apartment;
             DpiContext dpi;
             if (!IsWindow(hwnd) || IsIconic(hwnd) || !GraphicsCaptureSession::IsSupported()) {
@@ -315,19 +331,20 @@ namespace MCDevTool::Style::Detail {
                     factory.get(),
                     bitmap.get(),
                     static_cast<UINT>(crop->right - crop->left),
-                    static_cast<UINT>(crop->bottom - crop->top)
+                    static_cast<UINT>(crop->bottom - crop->top),
+                    resolution
                 );
             }
             return std::nullopt;
         }
     } // namespace
 
-    std::optional<std::vector<uint8_t>> captureWindow480p(HWND hwnd) {
+    std::optional<std::vector<uint8_t>> captureWindow(HWND hwnd, CaptureResolution resolution) {
         // 隔离 WinRT 的 MTA 要求，兼容已初始化 STA 的调用线程。
         std::optional<std::vector<uint8_t>> result;
-        std::thread                         worker([&] {
+        std::thread                         worker([&, resolution] {
             try {
-                result = captureOnWorker(hwnd);
+                result = captureOnWorker(hwnd, resolution);
             } catch (const winrt::hresult_error&) {
                 // 捕获不受支持、访问被拒绝、窗口关闭或设备丢失时沿用失败返回值。
                 result = std::nullopt;

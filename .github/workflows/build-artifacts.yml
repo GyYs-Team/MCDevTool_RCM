@@ -36,6 +36,11 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
+          submodules: recursive
+
+      - name: Test Python stdout capture
+        shell: bash
+        run: python tests/debug_stdout_capture_test.py
 
       - name: Generate embedded resources
         shell: bash
@@ -54,7 +59,7 @@ jobs:
         run: |
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DMC_DEV_TOOL_BUILD_TEST=OFF \
+            -DMC_DEV_TOOL_BUILD_TEST=ON \
             -DMC_DEV_TOOL_BUILD_MCDK=ON \
             -DMC_DEV_TOOL_BUILD_MCDK_STDIO_BRIDGE=ON \
             -DMC_DEV_TOOL_MCDK_ENABLE_CLI=OFF \
@@ -64,6 +69,26 @@ jobs:
         shell: bash
         run: |
           cmake --build build --config Release --target mcdk mcdk_stdio_bridge --parallel --verbose
+
+      - name: Test MCP tool definitions
+        shell: bash
+        run: |
+          cmake --build build --config Release --target mcp_tool_definitions_test --parallel --verbose
+          ctest --test-dir build -C Release -R mcp-tool-definitions --output-on-failure
+
+      - name: Test stdio bridge compatibility
+        shell: bash
+        run: |
+          BRIDGE="$(find build -type f \( -name mcdk_stdio_bridge -o -name mcdk_stdio_bridge.exe \) -print -quit)"
+          test -n "$BRIDGE"
+          python tests/stdio_bridge_test.py "$BRIDGE"
+
+      - name: Test debug IPC logs
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cmake --build build --config Release --target ipc_json_test --parallel --verbose
+          ctest --test-dir build -C Release -R ipc-json-and-logs --output-on-failure
 
       - name: Package Unix
         if: runner.os != 'Windows'

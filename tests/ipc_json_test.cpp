@@ -1,6 +1,8 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <condition_variable>
+#include <mutex>
 #include <string>
 #include <vector>
 #include <winsock2.h>
@@ -32,6 +34,16 @@ static bool recvAll(SOCKET sock, char* data, int len) {
     return true;
 }
 
+static bool sendAll(SOCKET sock, const std::string& data) {
+    int sent = 0;
+    while (sent < static_cast<int>(data.size())) {
+        const int count = send(sock, data.data() + sent, static_cast<int>(data.size()) - sent, 0);
+        if (count <= 0) return false;
+        sent += count;
+    }
+    return true;
+}
+
 int main() {
     using namespace MCDevTool::Debug;
 
@@ -42,10 +54,27 @@ int main() {
     }
 
     DebugIPCServer server;
+    std::mutex logMutex;
+    std::condition_variable logCondition;
+    std::vector<std::string> outputLogs;
+    std::vector<std::string> errorLogs;
+    server.setMessageHandler(IPC_LOG_OUTPUT_TYPE, [&](std::string line) {
+        {
+            std::lock_guard<std::mutex> lock(logMutex);
+            outputLogs.push_back(std::move(line));
+        }
+        logCondition.notify_all();
+    });
+    server.setMessageHandler(IPC_LOG_ERROR_TYPE, [&](std::string line) {
+        {
+            std::lock_guard<std::mutex> lock(logMutex);
+            errorLogs.push_back(std::move(line));
+        }
+        logCondition.notify_all();
+    });
     server.start();
 
     std::thread clientThread([&server]() {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
         SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         if (sock == INVALID_SOCKET) return;
 
@@ -54,6 +83,13 @@ int main() {
         addr.sin_port        = htons(server.getPort());
         addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         if (connect(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR) {
+            closesocket(sock);
+            return;
+        }
+
+        const std::string outputPacket = makePacket(IPC_LOG_OUTPUT_TYPE, "[Python] client output");
+        const std::string errorPacket  = makePacket(IPC_LOG_ERROR_TYPE, "[Python] client error");
+        if (!sendAll(sock, outputPacket) || !sendAll(sock, errorPacket)) {
             closesocket(sock);
             return;
         }
@@ -84,18 +120,41 @@ int main() {
             }
             std::string resp   = "{\"id\":" + id + ",\"ok\":true,\"result\":{\"pong\":true}}";
             std::string packet = makePacket(IPC_JSON_RESPONSE_TYPE, resp);
-            send(sock, packet.data(), static_cast<int>(packet.size()), 0);
+            sendAll(sock, packet);
         }
         closesocket(sock);
     });
 
+    const auto connectionDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (server.getClientCount() == 0 && std::chrono::steady_clock::now() < connectionDeadline) {
+        std::this_thread::yield();
+    }
+    if (server.getClientCount() == 0) {
+        server.safeExit();
+        if (clientThread.joinable()) clientThread.join();
+        WSACleanup();
+        std::cerr << "IPC client did not connect\n";
+        return 1;
+    }
+
     auto result = server.requestJson("ping", "{}", 10000);
     if (clientThread.joinable()) clientThread.join();
+    {
+        std::unique_lock<std::mutex> lock(logMutex);
+        logCondition.wait_for(lock, std::chrono::seconds(2), [&] {
+            return outputLogs.size() == 1 && errorLogs.size() == 1;
+        });
+    }
     server.safeExit();
     WSACleanup();
 
     if (!result.success) {
         std::cerr << "request failed: " << result.errorMessage << "\n";
+        return 1;
+    }
+    if (outputLogs != std::vector<std::string>{"[Python] client output"}
+        || errorLogs != std::vector<std::string>{"[Python] client error"}) {
+        std::cerr << "IPC log packets were not routed to their handlers\n";
         return 1;
     }
     std::cout << result.responseJson << "\n";

@@ -23,6 +23,7 @@ FAILURE = {
 
 class Backend(BaseHTTPRequestHandler):
     calls = []
+    requests = []
     offline = False
 
     def log_message(self, *_args):
@@ -30,6 +31,7 @@ class Backend(BaseHTTPRequestHandler):
 
     def do_POST(self):
         request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        self.requests.append(request["method"])
         if self.offline:
             self.send_response(503)
             self.end_headers()
@@ -80,15 +82,29 @@ def main():
     add("ping")
     wire = "".join(json.dumps(request) + "\n" for request in requests)
     try:
-        completed = subprocess.run(
-            [sys.argv[1], "--host", "127.0.0.1", "--port", str(server.server_port)],
-            input=wire,
-            capture_output=True,
-            encoding="utf-8",
-            timeout=30,
-            check=True,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
+        try:
+            completed = subprocess.run(
+                [sys.argv[1], "--host", "127.0.0.1", "--port", str(server.server_port)],
+                input=wire,
+                capture_output=True,
+                encoding="utf-8",
+                timeout=30,
+                check=True,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except subprocess.TimeoutExpired as error:
+            partial_stdout = error.stdout or ""
+            if isinstance(partial_stdout, bytes):
+                partial_stdout = partial_stdout.decode("utf-8", errors="replace")
+            reply_ids = []
+            for line in partial_stdout.splitlines():
+                try:
+                    reply_ids.append(json.loads(line).get("id"))
+                except json.JSONDecodeError:
+                    pass
+            raise AssertionError(
+                f"bridge timed out after replies {reply_ids}; backend requests={Backend.requests}"
+            ) from error
     finally:
         server.shutdown()
         server.server_close()
@@ -97,8 +113,11 @@ def main():
     replies = [json.loads(line) for line in completed.stdout.splitlines()]
     assert [reply["id"] for reply in replies] == list(range(1, len(requests) + 1))
     results = [reply["result"] for reply in replies]
-    names = {tool["name"] for tool in results[1]["tools"]}
+    tools = {tool["name"]: tool for tool in results[1]["tools"]}
+    names = set(tools)
     assert len(names) == 9 and {"mc_input", "mc_profiler", "capture_game_window"} <= names
+    capture_resolution = tools["capture_game_window"]["inputSchema"]["properties"]["resolution"]
+    assert capture_resolution["enum"] == ["preview", "full"]
     for index in (2, 3, 4, 7):
         assert results[index] == RESULT, "image, text and structured content must pass through unchanged"
     assert results[5] == FAILURE, "backend tool errors must remain unchanged"

@@ -300,6 +300,11 @@ void mcdk::launchGameExe(
         // Publish the MCP server only after every buffer and callback has been configured.
         mcpServer.start();
     }
+    auto logHandlers = createGameLogHandlers(needLogBuffer, logBuffer, errBuffer);
+    if (userConfig.includeDebugMod && enableIPC) {
+        ipcServer->setMessageHandler(MCDevTool::Debug::IPC_LOG_OUTPUT_TYPE, logHandlers.output);
+        ipcServer->setMessageHandler(MCDevTool::Debug::IPC_LOG_ERROR_TYPE, logHandlers.traceback);
+    }
     mcdk::PyReloadWatcherTask       pyReloadTask;
     mcdk::UiReloadWatcherTask       uiReloadTask;
     mcdk::ShaderReloadWatcherTask   shaderReloadTask;
@@ -845,11 +850,14 @@ void mcdk::launchGameExe(
     outWrite.reset();
     errWrite.reset();
 
-    auto logHandlers = createGameLogHandlers(needLogBuffer, logBuffer, errBuffer);
-
     // ===================== 用户配置后置处理 =====================
     if (safaiaReceiver) {
         safaiaReceiver->setLineHandlers(logHandlers.output, logHandlers.traceback);
+        if (debugCapabilityEnabled) {
+            safaiaReceiver->setPythonLineSuppressionPredicate([ipcServer] {
+                return ipcServer->getClientCount() != 0;
+            });
+        }
     }
     // 是否过滤非Python输出
     bool filterPython = userConfig.includeDebugMod;

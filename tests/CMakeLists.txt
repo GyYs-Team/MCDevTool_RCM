@@ -17,11 +17,21 @@ add_executable(mcp_server_test mcp_server_test.cpp)
 target_compile_features(mcp_server_test PRIVATE cxx_std_23)
 target_link_libraries(mcp_server_test PRIVATE mcdevtool mcp)
 
+add_executable(mcp_tool_definitions_test mcp_tool_definitions_test.cpp)
+target_compile_features(mcp_tool_definitions_test PRIVATE cxx_std_23)
+target_link_libraries(mcp_tool_definitions_test PRIVATE mcdk_mcp_tools)
+add_test(NAME mcp-tool-definitions COMMAND mcp_tool_definitions_test)
+
 add_executable(captureTest captureTest.cpp)
 target_compile_features(captureTest PRIVATE cxx_std_23)
 target_link_libraries(captureTest PRIVATE mcdevtool)
 
 if(WIN32)
+    add_executable(ipc_json_test ipc_json_test.cpp)
+    target_compile_features(ipc_json_test PRIVATE cxx_std_23)
+    target_link_libraries(ipc_json_test PRIVATE mcdevtool ws2_32)
+    add_test(NAME ipc-json-and-logs COMMAND ipc_json_test)
+
     # 需要交互式桌面及可用的 WGC / OpenGL 环境，按需运行。
     add_executable(window_capture_test window_capture_test.cpp)
     target_compile_features(window_capture_test PRIVATE cxx_std_23)

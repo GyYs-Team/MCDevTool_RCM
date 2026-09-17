@@ -187,12 +187,16 @@ namespace {
         UINT          width,
         UINT          height,
         const char*   label,
-        bool          resizeDuringCapture = false
+        bool          resizeDuringCapture = false,
+        MCDevTool::Style::CaptureResolution resolution = MCDevTool::Style::CaptureResolution::Preview
     ) {
         // 从已初始化 STA 的线程调用，验证内部 MTA 隔离且无需调用者消息泵。
-        auto future = std::async(std::launch::async, [] {
+        auto future = std::async(std::launch::async, [resolution] {
             winrt::init_apartment(winrt::apartment_type::single_threaded);
-            auto result = MCDevTool::Style::captureMinecraftWindow480p(static_cast<int>(GetCurrentProcessId()));
+            auto result = MCDevTool::Style::captureMinecraftWindow(
+                static_cast<int>(GetCurrentProcessId()),
+                resolution
+            );
             winrt::uninit_apartment();
             return result;
         });
@@ -316,6 +320,14 @@ int main(int argc, char* argv[]) {
         }
         verifyCaptureWithoutCallerCom(window);
         captureAndVerify(window, 640, 480, "OpenGL SwapBuffers / 480p / client crop");
+        captureAndVerify(
+            window,
+            800,
+            600,
+            "OpenGL SwapBuffers / full resolution / client crop",
+            false,
+            MCDevTool::Style::CaptureResolution::Full
+        );
 
         Occluder cover;
         cover.hwnd = CreateWindowExW(

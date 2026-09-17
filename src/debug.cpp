@@ -160,6 +160,15 @@ namespace MCDevTool::Debug {
         return sendMessage(messageType, reinterpret_cast<const uint8_t*>(data.data()), data.size());
     }
 
+    void DebugIPCServer::setMessageHandler(uint16_t messageType, IPCMessageHandler handler) {
+        std::lock_guard<std::mutex> lockGuard(mMessageHandlersMutex);
+        if (handler) {
+            mMessageHandlers[messageType] = std::move(handler);
+        } else {
+            mMessageHandlers.erase(messageType);
+        }
+    }
+
     bool DebugIPCServer::sendMessage(uint16_t messageType, const uint8_t* data, size_t length) {
         if (length > UINT32_MAX || (length > 0 && !data)) {
             return false;
@@ -457,6 +466,8 @@ namespace MCDevTool::Debug {
                     const uint8_t* payload = frame + IPC_HEADER_SIZE;
                     if (typeID == IPC_JSON_RESPONSE_TYPE) {
                         handleJsonResponsePacket(payload, length);
+                    } else {
+                        handleMessagePacket(typeID, payload, length);
                     }
                     consumed += frameSize;
                 }
@@ -480,6 +491,22 @@ namespace MCDevTool::Debug {
         }
 
         eraseClient(socketPtr, true);
+    }
+
+    void DebugIPCServer::handleMessagePacket(uint16_t messageType, const uint8_t* data, size_t length) {
+        IPCMessageHandler handler;
+        {
+            std::lock_guard<std::mutex> lockGuard(mMessageHandlersMutex);
+            const auto found = mMessageHandlers.find(messageType);
+            if (found == mMessageHandlers.end()) return;
+            handler = found->second;
+        }
+        if (!handler || (length > 0 && !data)) return;
+        try {
+            handler(std::string(reinterpret_cast<const char*>(data), length));
+        } catch (...) {
+            // A consumer failure must not tear down the shared game IPC connection.
+        }
     }
 
     void DebugIPCServer::handleJsonResponsePacket(const uint8_t* data, size_t length) {

@@ -63,6 +63,7 @@ namespace mcdk::detail {
         explicit SafaiaLogReceiver(DWORD processId);
 
         void setLineHandlers(LineHandler outputHandler, LineHandler tracebackHandler);
+        void setPythonLineSuppressionPredicate(std::function<bool()> predicate);
         [[nodiscard]] std::error_code start();
         [[nodiscard]] MCDevLink::Endpoint localEndpoint() const;
         void poll();
@@ -91,6 +92,7 @@ namespace mcdk::detail {
 
         LineHandler mOutputHandler;
         LineHandler mTracebackHandler;
+        std::function<bool()> mPythonLineSuppressionPredicate;
         std::unordered_map<MCDevLink::SessionId, StreamState> mStreams;
         MCDevLink::Runtime mRuntime;
         MCDevLink::Protocol::SafaiaService mService;

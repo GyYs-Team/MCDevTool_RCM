@@ -7,8 +7,8 @@ from .Game import (
     RELOAD_WORLD,
     RELOAD_SHADERS,
 )
-from .Config import DEBUG_CONFIG, LOG_PROTOCOL
-import threading
+from .Config import DEBUG_CONFIG
+from .StdoutCapture import SET_LOG_SENDER, STD_OUT_WRAPPER
 import sys
 
 lambda: "By Zero123"
@@ -16,54 +16,21 @@ lambda: "By Zero123"
 REF = 0
 
 
-class STD_OUT_WRAPPER(object):
-    def __init__(self, baseIO):
-        self.baseIO = baseIO
-        self.writeLock = threading.Lock()
-        self._buffer = []
-
-    def __getattr__(self, name):
-        return getattr(self.baseIO, name)
-
-    def write(self, data):
-        with self.writeLock:
-            parts = data.replace("\x00", "\\0").splitlines(True)
-            for part in parts:
-                if part.endswith("\n"):
-                    if self._buffer:
-                        line = "".join(self._buffer) + part
-                        self._buffer = []
-                    else:
-                        line = part
-                    self.baseIO.write("[Python] " + line)
-                else:
-                    self._buffer.append(part)
-
-    def close(self):
-        return self.baseIO.close()
-
-    def writelines(self, lines):
-        for line in lines:
-            self.write(line)
-
-    def fileno(self):
-        return self.baseIO.fileno()
-
-
 stdout = sys.stdout
 stderr = sys.stderr
-STDIO_CAPTURE_ENABLED = LOG_PROTOCOL == 0
+stdoutWrapper = STD_OUT_WRAPPER(stdout, "stdout")
+stderrWrapper = STD_OUT_WRAPPER(stderr, "stderr")
 
 
 def REST_STDOUT():
-    if STDIO_CAPTURE_ENABLED:
-        sys.stdout = stdout
-        sys.stderr = stderr
+    stdoutWrapper.flush()
+    stderrWrapper.flush()
+    sys.stdout = stdout
+    sys.stderr = stderr
 
 
-if STDIO_CAPTURE_ENABLED:
-    sys.stdout = STD_OUT_WRAPPER(sys.stdout)
-    sys.stderr = STD_OUT_WRAPPER(sys.stderr)
+sys.stdout = stdoutWrapper
+sys.stderr = stderrWrapper
 
 
 @PRE_SERVER_LOADER_HOOK
@@ -75,13 +42,16 @@ def SERVER_INIT():
         global REF
         REF -= 1
         if REF != 0:
+            IPCSystem.ON_SERVER_EXIT()
             return
         REST_STDOUT()
+        IPCSystem.ON_SERVER_EXIT()
 
     from .QuModLibs.Systems.Loader.Server import LoaderSystem
 
     LoaderSystem.REG_DESTROY_CALL_FUNC(_DESTROY)
     from . import IPCSystem
+    SET_LOG_SENDER(IPCSystem.SEND_LOG)
     IPCSystem.ON_SERVER_INIT()
 
 
@@ -108,14 +78,16 @@ def CLIENT_INIT():
     global REF
     REF += 1
     from . import IPCSystem
+    SET_LOG_SENDER(IPCSystem.SEND_LOG)
 
     def _DESTROY():
         global REF
         REF -= 1
-        IPCSystem.ON_CLIENT_EXIT()
         if REF != 0:
+            IPCSystem.ON_CLIENT_EXIT()
             return
         REST_STDOUT()
+        IPCSystem.ON_CLIENT_EXIT()
 
     from .QuModLibs.Systems.Loader.Client import LoaderSystem
 

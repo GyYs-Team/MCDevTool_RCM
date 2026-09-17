@@ -275,18 +275,22 @@ namespace MCDevTool::Style {
         }
     }
 
-    // 根据指定pid获取窗口内的画面信息 返回压缩480p的jpg数据
-    std::optional<std::vector<uint8_t>> captureMinecraftWindow480p(int pid) {
+    std::optional<std::vector<uint8_t>> captureMinecraftWindow(int pid, CaptureResolution resolution) {
 #ifdef _WIN32
         HWND hwnd = MCDevTool::Detail::findMinecraftWindow(static_cast<DWORD>(pid));
         if (!hwnd || IsIconic(hwnd)) {
             return std::nullopt;
         }
-        return Detail::captureWindow480p(hwnd);
+        return Detail::captureWindow(hwnd, resolution);
 #else
         (void)pid;
+        (void)resolution;
         return std::nullopt;
 #endif
+    }
+
+    std::optional<std::vector<uint8_t>> captureMinecraftWindow480p(int pid) {
+        return captureMinecraftWindow(pid, CaptureResolution::Preview);
     }
 
     bool triggerMinecraftUiReloadShortcut(int pid) {

@@ -517,12 +517,12 @@ namespace mcdk {
 
         // 初始化游戏窗口工具（如获取画面，模拟点击）
         void initGameWindowTools() {
-            // 截图工具：捕获游戏窗口画面，返回 480p JPEG base64 图片
+            // 截图工具：捕获游戏窗口画面，返回 JPEG base64 图片
             mcp::tool captureTool = mcp_tool_definitions::buildCaptureGameWindowTool();
 
             server->register_tool(
                 captureTool,
-                [this](const nlohmann::json& /* params */, const std::string& /* session_id */) -> nlohmann::json {
+                [this](const nlohmann::json& params, const std::string& /* session_id */) -> nlohmann::json {
                     const int pid = mcPid.load(std::memory_order_relaxed);
                     if (pid <= 0) {
                         return nlohmann::json{
@@ -535,7 +535,32 @@ namespace mcdk {
                         };
                     }
 
-                    auto result = MCDevTool::Style::captureMinecraftWindow480p(pid);
+                    auto resolution = MCDevTool::Style::CaptureResolution::Preview;
+                    if (params.contains("resolution")) {
+                        if (!params.at("resolution").is_string()) {
+                            return nlohmann::json{
+                                {"isError", true},
+                                {"content",
+                                 nlohmann::json::array(
+                                     {{{"type", "text"}, {"text", "resolution must be 'preview' or 'full'."}}}
+                                 )}
+                            };
+                        }
+                        const auto value = params.at("resolution").get<std::string>();
+                        if (value == "full") {
+                            resolution = MCDevTool::Style::CaptureResolution::Full;
+                        } else if (value != "preview") {
+                            return nlohmann::json{
+                                {"isError", true},
+                                {"content",
+                                 nlohmann::json::array(
+                                     {{{"type", "text"}, {"text", "resolution must be 'preview' or 'full'."}}}
+                                 )}
+                            };
+                        }
+                    }
+
+                    auto result = MCDevTool::Style::captureMinecraftWindow(pid, resolution);
                     if (!result.has_value() || result->empty()) {
                         return nlohmann::json{
                             {"isError", true},

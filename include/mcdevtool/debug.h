@@ -18,6 +18,10 @@
 namespace MCDevTool::Debug {
     inline constexpr uint16_t IPC_JSON_REQUEST_TYPE  = 100;
     inline constexpr uint16_t IPC_JSON_RESPONSE_TYPE = 101;
+    inline constexpr uint16_t IPC_LOG_OUTPUT_TYPE    = 102;
+    inline constexpr uint16_t IPC_LOG_ERROR_TYPE     = 103;
+
+    using IPCMessageHandler = std::function<void(std::string)>;
 
     struct IPCJsonResult {
         bool        success   = false; // 仅表示 IPC request/response 是否成功完成，不代表业务 ok 字段
@@ -53,6 +57,7 @@ namespace MCDevTool::Debug {
         bool sendMessage(uint16_t messageType, const std::vector<uint8_t>& data);
         bool sendMessage(uint16_t messageType, const uint8_t* data, size_t length);
         bool sendMessage(uint16_t messageType);
+        void setMessageHandler(uint16_t messageType, IPCMessageHandler handler);
 
         // 发送 JSON request 到一个已连接客户端并等待同 id 的 JSON response；默认 10 秒超时；API 内部吞掉异常并返回错误信息
         IPCJsonResult requestJson(std::string_view method, std::string_view paramsJson = "{}", uint32_t timeoutMs = 10000);
@@ -84,6 +89,8 @@ namespace MCDevTool::Debug {
         mutable std::mutex                                  mClientsMutex;
         std::mutex                                          mClientThreadsMutex;
         std::mutex                                          mSendMutex;
+        std::mutex                                          mMessageHandlersMutex;
+        std::map<uint16_t, IPCMessageHandler>               mMessageHandlers;
         std::mutex                                          mPendingJsonMutex;
         std::map<uint64_t, std::shared_ptr<PendingJsonRequest>> mPendingJsonRequests;
         std::atomic<uint64_t>                               mNextJsonRequestId = 1;
@@ -97,6 +104,7 @@ namespace MCDevTool::Debug {
             bool             retainResponseValue
         );
         void clientReadLoop(void* socketPtr);
+        void handleMessagePacket(uint16_t messageType, const uint8_t* data, size_t length);
         void handleJsonResponsePacket(const uint8_t* data, size_t length);
         void eraseClient(void* socketPtr, bool closeSocket);
     };
