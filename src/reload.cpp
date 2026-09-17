@@ -373,42 +373,32 @@ namespace MCDevTool::HotReload {
         const std::function<void(const std::filesystem::path&)>&,
         FileWatchPredicate,
         std::atomic<bool>*
-    ) {
-        return std::nullopt;
-    }
+    ) = delete;
 
     std::optional<std::thread> watchAndReloadFiles(
         const std::vector<std::string_view>&,
         const std::function<void(const std::filesystem::path&)>&,
         FileWatchPredicate,
         std::atomic<bool>*
-    ) {
-        return std::nullopt;
-    }
+    ) = delete;
 
     std::optional<std::thread> watchAndReloadPyFiles(
         const std::vector<std::filesystem::path>&,
         const std::function<void(const std::filesystem::path&)>&,
         std::atomic<bool>*
-    ) {
-        return std::nullopt;
-    }
+    ) = delete;
 
     std::optional<std::thread> watchAndReloadPyFiles(
         const std::vector<std::string_view>&,
         const std::function<void(const std::filesystem::path&)>&,
         std::atomic<bool>*
-    ) {
-        return std::nullopt;
-    }
+    ) = delete;
 
     std::optional<std::thread> watchProcessForegroundWindow(
         uint32_t,
         const std::function<void(bool isForeground)>&,
         std::atomic<bool>*
-    ) {
-        return std::nullopt;
-    }
+    ) = delete;
 
 #endif
 
