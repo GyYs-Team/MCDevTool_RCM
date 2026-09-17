@@ -87,7 +87,7 @@ namespace MCDevTool::Style {
         std::atomic<bool>          mStopFlag = false;
     };
 
-    // WGC 捕获客户区（支持遮挡），Preview 返回最高 480p 的 JPEG，Full 保留客户区原始像素。
+    // WGC 捕获客户区（支持遮挡），Preview 返回最高 480p 的 JPEG，Full 返回原始尺寸的无损 PNG。
     // 需要 Windows 10 1903+；窗口最小化、捕获不可用或3秒内无有效帧时返回 nullopt。
     std::optional<std::vector<uint8_t>>
     captureMinecraftWindow(int pid, CaptureResolution resolution = CaptureResolution::Preview);

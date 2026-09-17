@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -20,6 +21,7 @@
 #include <mcp_server.h>
 #include <base64.hpp>
 #include <mcdevtool/style.h>
+#include <mcdevtool/utils.h>
 
 namespace mcdk {
 
@@ -57,6 +59,56 @@ namespace mcdk {
             return false;
         } catch (...) {
             error = "Unknown file write error.";
+            return false;
+        }
+    }
+
+    static bool writeCaptureFile(
+        const std::filesystem::path&             directory,
+        const std::vector<uint8_t>&              data,
+        int                                       pid,
+        MCDevTool::Style::CaptureResolution       resolution,
+        std::filesystem::path&                    outputPath,
+        std::string&                              error
+    ) {
+        try {
+            if (!directory.is_absolute()) {
+                error = "output_dir must be an absolute path.";
+                return false;
+            }
+            std::filesystem::create_directories(directory);
+            if (!std::filesystem::is_directory(directory)) {
+                error = "output_dir is not a directory.";
+                return false;
+            }
+
+            static std::atomic_uint64_t sequence = 0;
+            const auto epochMilliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                               std::chrono::system_clock::now().time_since_epoch()
+            ).count();
+            const bool full = resolution == MCDevTool::Style::CaptureResolution::Full;
+            const auto filename = "minecraft_capture_" + std::to_string(pid) + "_"
+                                + std::to_string(epochMilliseconds) + "_"
+                                + std::to_string(sequence.fetch_add(1, std::memory_order_relaxed)) + "_"
+                                + (full ? "full.png" : "preview.jpg");
+            outputPath = directory / filename;
+
+            std::ofstream file(outputPath, std::ios::binary | std::ios::trunc);
+            if (!file) {
+                error = "Failed to open screenshot output file.";
+                return false;
+            }
+            file.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
+            if (!file) {
+                error = "Failed to write screenshot output file.";
+                return false;
+            }
+            return true;
+        } catch (const std::exception& exc) {
+            error = exc.what();
+            return false;
+        } catch (...) {
+            error = "Unknown screenshot file write error.";
             return false;
         }
     }
@@ -517,7 +569,7 @@ namespace mcdk {
 
         // 初始化游戏窗口工具（如获取画面，模拟点击）
         void initGameWindowTools() {
-            // 截图工具：捕获游戏窗口画面，返回 JPEG base64 图片
+            // 截图工具：预览返回 JPEG，全分辨率返回无损 PNG。
             mcp::tool captureTool = mcp_tool_definitions::buildCaptureGameWindowTool();
 
             server->register_tool(
@@ -560,6 +612,39 @@ namespace mcdk {
                         }
                     }
 
+                    std::optional<std::filesystem::path> outputDirectory;
+                    if (params.contains("output_dir")) {
+                        if (!params.at("output_dir").is_string()) {
+                            return nlohmann::json{
+                                {"isError", true},
+                                {"content",
+                                 nlohmann::json::array(
+                                     {{{"type", "text"}, {"text", "output_dir must be an absolute directory path."}}}
+                                 )}
+                            };
+                        }
+                        try {
+                            outputDirectory = std::filesystem::u8path(params.at("output_dir").get<std::string>());
+                        } catch (const std::exception& error) {
+                            return nlohmann::json{
+                                {"isError", true},
+                                {"content",
+                                 nlohmann::json::array(
+                                     {{{"type", "text"}, {"text", "Invalid output_dir: " + std::string(error.what())}}}
+                                 )}
+                            };
+                        }
+                        if (outputDirectory->empty() || !outputDirectory->is_absolute()) {
+                            return nlohmann::json{
+                                {"isError", true},
+                                {"content",
+                                 nlohmann::json::array(
+                                     {{{"type", "text"}, {"text", "output_dir must be an absolute directory path."}}}
+                                 )}
+                            };
+                        }
+                    }
+
                     auto result = MCDevTool::Style::captureMinecraftWindow(pid, resolution);
                     if (!result.has_value() || result->empty()) {
                         return nlohmann::json{
@@ -576,13 +661,45 @@ namespace mcdk {
                         };
                     }
 
-                    // 将 JPEG 数据编码为 base64
-                    std::string b64 = base64::encode(reinterpret_cast<const char*>(result->data()), result->size());
+                    const char* mimeType = resolution == MCDevTool::Style::CaptureResolution::Full
+                                             ? "image/png"
+                                             : "image/jpeg";
 
+                    if (outputDirectory) {
+                        std::filesystem::path outputPath;
+                        std::string           writeError;
+                        if (!writeCaptureFile(*outputDirectory, *result, pid, resolution, outputPath, writeError)) {
+                            return nlohmann::json{
+                                {"isError", true},
+                                {"content",
+                                 nlohmann::json::array(
+                                     {{{"type", "text"}, {"text", "Failed to save screenshot: " + writeError}}}
+                                 )}
+                            };
+                        }
+                        const auto path = MCDevTool::Utils::pathToGenericUtf8(outputPath);
+                        return nlohmann::json{
+                            {"isError", false},
+                            {"content",
+                             nlohmann::json::array(
+                                 {{{"type", "text"}, {"text", "Screenshot saved to: " + path}}}
+                             )},
+                            {"structuredContent",
+                             {{"ok", true},
+                              {"path", path},
+                              {"mime_type", mimeType},
+                              {"byte_size", result->size()},
+                              {"resolution", resolution == MCDevTool::Style::CaptureResolution::Full ? "full"
+                                                                                                     : "preview"}}}
+                        };
+                    }
+
+                    // 只有内联返回才生成 Base64；落盘模式避免复制大图进入 Agent 上下文。
+                    std::string b64 = base64::encode(reinterpret_cast<const char*>(result->data()), result->size());
                     return nlohmann::json{
                         {"isError", false},
                         {"content",
-                         nlohmann::json::array({{{"type", "image"}, {"data", b64}, {"mimeType", "image/jpeg"}}})}
+                         nlohmann::json::array({{{"type", "image"}, {"data", b64}, {"mimeType", mimeType}}})}
                     };
                 }
             );

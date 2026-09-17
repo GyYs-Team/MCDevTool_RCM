@@ -41,7 +41,6 @@ namespace {
         _setmode(_fileno(stdout), _O_BINARY);
         SetConsoleCP(CP_UTF8);
         SetConsoleOutputCP(CP_UTF8);
-        std::setlocale(LC_ALL, ".UTF-8");
     }
 #else
     void configureStdioAndUtf8Console() { std::setlocale(LC_ALL, ""); }
@@ -335,7 +334,7 @@ namespace {
         }
 
         bool initialize(std::string& error) {
-            httplib::Client client(baseUrl());
+            httplib::Client client(config_.host, config_.port);
             configureClient(client, InitializationTimeoutSec);
 
             json initializeRequest = {
@@ -388,7 +387,7 @@ namespace {
         }
 
         bool postJson(const json& request, json& response, std::string& error) {
-            httplib::Client client(baseUrl());
+            httplib::Client client(config_.host, config_.port);
             configureClient(client, ReadWriteTimeoutSeconds);
 
             httplib::Headers headers;

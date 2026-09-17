@@ -75,6 +75,9 @@ add_executable(mcdk main.cpp)
 target_compile_features(mcdk PRIVATE cxx_std_23)
 target_include_directories(mcdk PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/libs)
 target_link_libraries(mcdk PRIVATE mcdk_runtime)
+if(MINGW)
+    target_link_options(mcdk PRIVATE -municode)
+endif()
 include(GNUInstallDirs)
 install(TARGETS mcdk
     RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"

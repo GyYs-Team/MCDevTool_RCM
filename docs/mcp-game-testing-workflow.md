@@ -41,7 +41,7 @@ MCDK 的 MCP 能力更适合作为“开发期可观测测试通道”：在开�
 - `get_latest_logs`：读取最近日志，收集结构化测试结果；
 - `get_latest_error_logs`：优先确认是否存在 Python stderr 或异常；
 - `reload_game`：仅在热更新无法覆盖时使用；资源级重载传入 `reload_addons=true`；
-- `capture_game_window`：只在日志无法判断或需要视觉确认时使用；默认预览图最高 480p，像素级对照传入 `resolution="full"`。
+- `capture_game_window`：只在日志无法判断或需要视觉确认时使用；默认预览图为最高 480p 的 JPEG，像素级对照传入 `resolution="full"` 获取无损 PNG。
 
 推荐执行顺序：
 

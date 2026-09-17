@@ -54,9 +54,11 @@ Parameters:
 
         constexpr auto CaptureGameWindowName = "capture_game_window";
         constexpr auto CaptureGameWindowDescription =
-            "Captures the current Minecraft game window as a JPEG screenshot and returns base64-encoded image data. "
-            "resolution='preview' (default) limits the image to 480p without upscaling; resolution='full' preserves "
-            "the current game client area's original pixel dimensions. "
+            "Captures the current Minecraft game window and returns base64-encoded image data. "
+            "resolution='preview' (default) returns a JPEG limited to 480p without upscaling; resolution='full' "
+            "returns a lossless PNG at the game client area's original pixel dimensions. "
+            "Set output_dir to an absolute directory to save the screenshot there and return only its path and "
+            "metadata instead of loading the image into the model context. "
             "This is a relatively expensive visual inspection tool and can distract from code/log based debugging. "
             "For UI structure, layout, node visibility, or JSON UI validation, prefer the specialized jsonui_debugger "
             "tool before using screenshots. Prefer get_latest_logs, get_latest_error_logs, and deterministic file/code "
@@ -119,10 +121,15 @@ Parameters:
             .with_description(CaptureGameWindowDescription)
             .with_string_param(
                 "resolution",
-                "Screenshot resolution: preview (default, at most 480p) or full (original client-area pixels)",
+                "Screenshot mode: preview (default, JPEG at most 480p) or full (lossless PNG at original client-area pixels)",
                 false
             )
-            .with_read_only_hint(true)
+            .with_string_param(
+                "output_dir",
+                "Optional absolute directory. Saves a uniquely named screenshot and returns its path without inline image data.",
+                false
+            )
+            .with_read_only_hint(false)
             .build();
         tool.parameters_schema["properties"]["resolution"]["enum"] = Json::array({"preview", "full"});
         return tool;

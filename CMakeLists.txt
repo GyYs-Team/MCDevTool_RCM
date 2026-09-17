@@ -5,6 +5,12 @@ cmake_policy(SET CMP0091 NEW)
 project(MC_DEV_TOOL_ROOT LANGUAGES CXX C)
 
 option(MC_DEV_TOOL_BUILD_TEST "BUILD TEST EXECUTABLE" OFF)
+set(
+    MC_DEV_TOOL_WINDOWS_SDK_INCLUDE_ROOT
+    ""
+    CACHE PATH
+    "Versioned Windows SDK include root containing cppwinrt/, for MinGW builds without C++/WinRT headers"
+)
 if(MC_DEV_TOOL_BUILD_TEST)
     enable_testing()
 endif()
@@ -34,6 +40,9 @@ list(REMOVE_ITEM
 )
 set_property(TARGET MCDevLink PROPERTY INCLUDE_DIRECTORIES "${_mcdevlink_include_dirs}")
 target_include_directories(MCDevLink PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/libs/nlohmann")
+if(WIN32 AND MINGW)
+    target_link_libraries(MCDevLink PRIVATE mswsock)
+endif()
 unset(_mcdevlink_include_dirs)
 
 add_library(mcdevtool_utils STATIC src/utils.cpp)
@@ -61,12 +70,22 @@ set_target_properties(mcdevtool PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_compile_features(mcdevtool PRIVATE cxx_std_23)
 target_compile_definitions(mcdevtool PRIVATE _CRT_SECURE_NO_WARNINGS)
 target_include_directories(mcdevtool PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+if(WIN32 AND MC_DEV_TOOL_WINDOWS_SDK_INCLUDE_ROOT)
+    if(NOT EXISTS "${MC_DEV_TOOL_WINDOWS_SDK_INCLUDE_ROOT}/cppwinrt/winrt/Windows.Foundation.h")
+        message(FATAL_ERROR
+            "MC_DEV_TOOL_WINDOWS_SDK_INCLUDE_ROOT must contain cppwinrt/winrt/Windows.Foundation.h"
+        )
+    endif()
+    target_include_directories(mcdevtool SYSTEM PUBLIC
+        "${MC_DEV_TOOL_WINDOWS_SDK_INCLUDE_ROOT}/cppwinrt"
+    )
+endif()
 
 # target_include_directories(mcdevtool PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/libs/nlohmann)
 # target_include_directories(mcdevtool PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/libs/nbt/include)
 target_link_libraries(mcdevtool PUBLIC NBT mcdevtool_game_discovery)
 if(WIN32)
-    target_link_libraries(mcdevtool PUBLIC d3d11 dwmapi windowsapp windowscodecs ole32)
+    target_link_libraries(mcdevtool PUBLIC d3d11 dwmapi imm32 windowsapp windowscodecs ole32)
 endif()
 
 add_subdirectory(mods)

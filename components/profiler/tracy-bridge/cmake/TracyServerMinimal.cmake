@@ -68,4 +68,6 @@ target_link_libraries(mcdev-tracy-server PUBLIC mcdev-tracy-zstd capstone ws2_32
 if(MSVC)
     target_compile_options(mcdev-tracy-server PRIVATE /W0 /utf-8)
     target_compile_options(mcdev-tracy-zstd PRIVATE /W0)
+elseif(MINGW)
+    target_compile_options(mcdev-tracy-server PRIVATE -mlzcnt)
 endif()

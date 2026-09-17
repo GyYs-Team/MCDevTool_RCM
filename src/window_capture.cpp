@@ -9,10 +9,16 @@
 #include <limits>
 #include <thread>
 #include <d3d11.h>
+#include <dxgi.h>
 #include <dwmapi.h>
+#include <inspectable.h>
 #include <wincodec.h>
-#include <windows.graphics.capture.interop.h>
-#include <windows.graphics.directx.direct3d11.interop.h>
+
+STDAPI CreateDirect3D11DeviceFromDXGIDevice(
+    IDXGIDevice* dxgiDevice,
+    IInspectable** graphicsDevice
+);
+
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Graphics.Capture.h>
 #include <winrt/Windows.Graphics.DirectX.Direct3D11.h>
@@ -23,6 +29,20 @@ namespace MCDevTool::Style::Detail {
         using namespace winrt::Windows::Graphics::Capture;
         using namespace winrt::Windows::Graphics::DirectX;
         using namespace winrt::Windows::Graphics::DirectX::Direct3D11;
+
+        constexpr GUID graphicsCaptureItemInteropId{
+            0x3628e81b,
+            0x3cac,
+            0x4c60,
+            {0xb7, 0xf4, 0x23, 0xce, 0x0e, 0x0c, 0x33, 0x56}
+        };
+
+        constexpr GUID direct3DDxgiInterfaceAccessId{
+            0xa9b3d012,
+            0x3df2,
+            0x4ee3,
+            {0xb8, 0xd1, 0x86, 0x95, 0xf4, 0x57, 0xd3, 0xc1}
+        };
 
         // 成功、超时和异常路径都显式关闭捕获资源。
         template <typename T>
@@ -36,6 +56,23 @@ namespace MCDevTool::Style::Detail {
                 }
             }
         };
+
+        HRESULT createCaptureItemForWindow(
+            IUnknown* interop,
+            HWND      window,
+            REFIID    iid,
+            void**    result
+        ) {
+            using Method = HRESULT(STDMETHODCALLTYPE*)(IUnknown*, HWND, REFIID, void**);
+            auto vtable = *reinterpret_cast<void***>(interop);
+            return reinterpret_cast<Method>(vtable[3])(interop, window, iid, result);
+        }
+
+        HRESULT getDxgiInterface(IUnknown* access, REFIID iid, void** result) {
+            using Method = HRESULT(STDMETHODCALLTYPE*)(IUnknown*, REFIID, void**);
+            auto vtable = *reinterpret_cast<void***>(access);
+            return reinterpret_cast<Method>(vtable[3])(access, iid, result);
+        }
 
         struct Apartment {
             Apartment() {
@@ -97,7 +134,7 @@ namespace MCDevTool::Style::Detail {
             return crop;
         }
 
-        std::vector<uint8_t> encodeJpeg(
+        std::vector<uint8_t> encodeCaptureImage(
             IWICImagingFactory* factory,
             IWICBitmapSource*   bitmap,
             UINT                width,
@@ -122,36 +159,48 @@ namespace MCDevTool::Style::Detail {
             }
 
             winrt::com_ptr<IWICFormatConverter> converter;
-            winrt::check_hresult(factory->CreateFormatConverter(converter.put()));
-            winrt::check_hresult(converter->Initialize(
-                encodeSource,
-                GUID_WICPixelFormat24bppBGR,
-                WICBitmapDitherTypeNone,
-                nullptr,
-                0,
-                WICBitmapPaletteTypeCustom
-            ));
+            WICPixelFormatGUID                  format = GUID_WICPixelFormat32bppBGRA;
+            GUID                                containerFormat = GUID_ContainerFormatPng;
+            if (resolution == CaptureResolution::Preview) {
+                winrt::check_hresult(factory->CreateFormatConverter(converter.put()));
+                winrt::check_hresult(converter->Initialize(
+                    encodeSource,
+                    GUID_WICPixelFormat24bppBGR,
+                    WICBitmapDitherTypeNone,
+                    nullptr,
+                    0,
+                    WICBitmapPaletteTypeCustom
+                ));
+                encodeSource    = converter.get();
+                format          = GUID_WICPixelFormat24bppBGR;
+                containerFormat = GUID_ContainerFormatJpeg;
+            }
 
             winrt::com_ptr<IStream> stream;
             winrt::check_hresult(CreateStreamOnHGlobal(nullptr, TRUE, stream.put()));
             winrt::com_ptr<IWICBitmapEncoder> encoder;
-            winrt::check_hresult(factory->CreateEncoder(GUID_ContainerFormatJpeg, nullptr, encoder.put()));
+            winrt::check_hresult(factory->CreateEncoder(containerFormat, nullptr, encoder.put()));
             winrt::check_hresult(encoder->Initialize(stream.get(), WICBitmapEncoderNoCache));
             winrt::com_ptr<IWICBitmapFrameEncode> frame;
             winrt::com_ptr<IPropertyBag2>         options;
             winrt::check_hresult(encoder->CreateNewFrame(frame.put(), options.put()));
-            PROPBAG2 property{};
-            property.pstrName = const_cast<wchar_t*>(L"ImageQuality");
-            VARIANT quality{};
-            quality.vt     = VT_R4;
-            quality.fltVal = 0.75f;
-            winrt::check_hresult(options->Write(1, &property, &quality));
+            if (resolution == CaptureResolution::Preview) {
+                PROPBAG2 property{};
+                property.pstrName = const_cast<wchar_t*>(L"ImageQuality");
+                VARIANT quality{};
+                quality.vt     = VT_R4;
+                quality.fltVal = 0.75f;
+                winrt::check_hresult(options->Write(1, &property, &quality));
+            }
             winrt::check_hresult(frame->Initialize(options.get()));
             winrt::check_hresult(frame->SetSize(targetWidth, targetHeight));
-            WICPixelFormatGUID format = GUID_WICPixelFormat24bppBGR;
             winrt::check_hresult(frame->SetPixelFormat(&format));
-            winrt::check_bool(IsEqualGUID(format, GUID_WICPixelFormat24bppBGR));
-            winrt::check_hresult(frame->WriteSource(converter.get(), nullptr));
+            winrt::check_bool(IsEqualGUID(
+                format,
+                resolution == CaptureResolution::Preview ? GUID_WICPixelFormat24bppBGR
+                                                         : GUID_WICPixelFormat32bppBGRA
+            ));
+            winrt::check_hresult(frame->WriteSource(encodeSource, nullptr));
             winrt::check_hresult(frame->Commit());
             winrt::check_hresult(encoder->Commit());
 
@@ -174,9 +223,14 @@ namespace MCDevTool::Style::Detail {
             SizeInt32                     size,
             const RECT&                   crop
         ) {
-            auto access = frame.Surface().as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
+            auto surface = frame.Surface();
+            winrt::com_ptr<IUnknown> access;
+            winrt::check_hresult(reinterpret_cast<IUnknown*>(winrt::get_abi(surface))->QueryInterface(
+                direct3DDxgiInterfaceAccessId,
+                access.put_void()
+            ));
             winrt::com_ptr<ID3D11Texture2D> texture;
-            winrt::check_hresult(access->GetInterface(__uuidof(ID3D11Texture2D), texture.put_void()));
+            winrt::check_hresult(getDxgiInterface(access.get(), __uuidof(ID3D11Texture2D), texture.put_void()));
             D3D11_TEXTURE2D_DESC desc{};
             texture->GetDesc(&desc);
             if (desc.Width < static_cast<UINT>(size.Width) || desc.Height < static_cast<UINT>(size.Height)) {
@@ -235,12 +289,20 @@ namespace MCDevTool::Style::Detail {
                 return std::nullopt;
             }
 
-            auto interop = winrt::get_activation_factory<GraphicsCaptureItem, IGraphicsCaptureItemInterop>();
+            auto factory = winrt::get_activation_factory<GraphicsCaptureItem>();
+            winrt::com_ptr<IUnknown> interop;
+            winrt::check_hresult(reinterpret_cast<IUnknown*>(winrt::get_abi(factory))->QueryInterface(
+                graphicsCaptureItemInteropId,
+                interop.put_void()
+            ));
             keepCaptureModuleLoaded(interop.get());
             GraphicsCaptureItem item{nullptr};
-            winrt::check_hresult(
-                interop->CreateForWindow(hwnd, winrt::guid_of<GraphicsCaptureItem>(), winrt::put_abi(item))
-            );
+            winrt::check_hresult(createCaptureItemForWindow(
+                interop.get(),
+                hwnd,
+                winrt::guid_of<GraphicsCaptureItem>(),
+                winrt::put_abi(item)
+            ));
             auto poolSize = item.Size();
             if (poolSize.Width <= 0 || poolSize.Height <= 0) {
                 return std::nullopt;
@@ -327,7 +389,7 @@ namespace MCDevTool::Style::Detail {
                 if (!bitmap) {
                     continue;
                 }
-                return encodeJpeg(
+                return encodeCaptureImage(
                     factory.get(),
                     bitmap.get(),
                     static_cast<UINT>(crop->right - crop->left),

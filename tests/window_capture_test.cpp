@@ -142,11 +142,30 @@ namespace {
         }
     };
 
-    void verifyJpeg(const std::vector<uint8_t>& jpeg, UINT expectedWidth, UINT expectedHeight) {
+    void verifyImage(
+        const std::vector<uint8_t>&                  image,
+        UINT                                         expectedWidth,
+        UINT                                         expectedHeight,
+        MCDevTool::Style::CaptureResolution          resolution
+    ) {
+        if (resolution == MCDevTool::Style::CaptureResolution::Preview) {
+            require(
+                image.size() >= 3 && image[0] == 0xff && image[1] == 0xd8 && image[2] == 0xff,
+                "Preview capture is not JPEG"
+            );
+        } else {
+            constexpr std::array<uint8_t, 8> pngSignature{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a};
+            require(
+                image.size() >= pngSignature.size()
+                    && std::equal(pngSignature.begin(), pngSignature.end(), image.begin()),
+                "Full capture is not PNG"
+            );
+        }
+
         auto                    factory = winrt::create_instance<IWICImagingFactory>(CLSID_WICImagingFactory);
         winrt::com_ptr<IStream> stream;
         winrt::check_hresult(CreateStreamOnHGlobal(nullptr, TRUE, stream.put()));
-        winrt::check_hresult(stream->Write(jpeg.data(), static_cast<ULONG>(jpeg.size()), nullptr));
+        winrt::check_hresult(stream->Write(image.data(), static_cast<ULONG>(image.size()), nullptr));
         winrt::check_hresult(stream->Seek({}, STREAM_SEEK_SET, nullptr));
         winrt::com_ptr<IWICBitmapDecoder> decoder;
         winrt::check_hresult(
@@ -156,7 +175,7 @@ namespace {
         winrt::check_hresult(decoder->GetFrame(0, frame.put()));
         UINT width = 0, height = 0;
         winrt::check_hresult(frame->GetSize(&width, &height));
-        require(width == expectedWidth && height == expectedHeight, "Incorrect JPEG dimensions / client crop");
+        require(width == expectedWidth && height == expectedHeight, "Incorrect image dimensions / client crop");
         winrt::com_ptr<IWICFormatConverter> converter;
         winrt::check_hresult(factory->CreateFormatConverter(converter.put()));
         winrt::check_hresult(converter->Initialize(
@@ -209,9 +228,12 @@ namespace {
         auto result = future.get();
         require(result.has_value() && !result->empty(), "WGC returned no image");
         try {
-            verifyJpeg(*result, width, height);
+            verifyImage(*result, width, height, resolution);
         } catch (...) {
-            std::ofstream file("window_capture_failure.jpg", std::ios::binary);
+            const auto filename = resolution == MCDevTool::Style::CaptureResolution::Full
+                                    ? "window_capture_failure.png"
+                                    : "window_capture_failure.jpg";
+            std::ofstream file(filename, std::ios::binary);
             file.write(reinterpret_cast<const char*>(result->data()), static_cast<std::streamsize>(result->size()));
             throw;
         }
@@ -324,7 +346,7 @@ int main(int argc, char* argv[]) {
             window,
             800,
             600,
-            "OpenGL SwapBuffers / full resolution / client crop",
+            "OpenGL SwapBuffers / full resolution PNG / client crop",
             false,
             MCDevTool::Style::CaptureResolution::Full
         );

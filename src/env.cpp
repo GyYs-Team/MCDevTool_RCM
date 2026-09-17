@@ -2,22 +2,65 @@
 #include "mcdevtool/utils.h"
 #include <algorithm>
 #include <cstdlib>
-#include <utility> // std::move
 #include <iostream>
+#include <system_error>
+#include <utility> // std::move
+#include <vector>
 
 #ifdef _WIN32
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
 #include <winioctl.h>
+
+namespace {
+    void removePathWithoutFollowingReparsePoints(const std::filesystem::path& path) {
+        WIN32_FIND_DATAW findData{};
+        HANDLE           findHandle = FindFirstFileW(path.c_str(), &findData);
+        if (findHandle == INVALID_HANDLE_VALUE) {
+            const DWORD error = GetLastError();
+            if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) {
+                return;
+            }
+            throw std::system_error(error, std::system_category(), "FindFirstFileW failed");
+        }
+        FindClose(findHandle);
+
+        const bool isDirectory = (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+        const bool isReparsePoint = (findData.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+        if (isReparsePoint) {
+            const BOOL removed = isDirectory ? RemoveDirectoryW(path.c_str()) : DeleteFileW(path.c_str());
+            if (!removed) {
+                throw std::system_error(GetLastError(), std::system_category(), "Failed to remove reparse point");
+            }
+            return;
+        }
+
+        if (isDirectory) {
+            for (const auto& entry : std::filesystem::directory_iterator(path)) {
+                removePathWithoutFollowingReparsePoints(entry.path());
+            }
+            if (!RemoveDirectoryW(path.c_str())) {
+                throw std::system_error(GetLastError(), std::system_category(), "RemoveDirectoryW failed");
+            }
+            return;
+        }
+
+        if (!DeleteFileW(path.c_str())) {
+            throw std::system_error(GetLastError(), std::system_category(), "DeleteFileW failed");
+        }
+    }
+} // namespace
 
 // 软链接目录
 bool MCDevTool::createDirectoryJunction(const std::filesystem::path& target, const std::filesystem::path& link) {
 
     std::filesystem::create_directories(link.parent_path());
-    if (std::filesystem::exists(link)) {
-        std::filesystem::remove_all(link);
-    }
+    removePathWithoutFollowingReparsePoints(link);
     std::filesystem::create_directory(link);
 
     HANDLE h = CreateFileW(
@@ -79,6 +122,12 @@ bool MCDevTool::createDirectoryJunction(const std::filesystem::path& target, con
 }
 
 #else
+namespace {
+    void removePathWithoutFollowingReparsePoints(const std::filesystem::path& path) {
+        std::filesystem::remove_all(path);
+    }
+} // namespace
+
 bool MCDevTool::createDirectoryJunction(const std::filesystem::path&, const std::filesystem::path&) {
     return false;
 }
@@ -126,17 +175,13 @@ namespace MCDevTool {
     // 清理运行时行为包目录
     void cleanRuntimeBehaviorPacks() {
         auto runtimeBPPath = getBehaviorPacksPath();
-        if (std::filesystem::is_directory(runtimeBPPath)) {
-            std::filesystem::remove_all(runtimeBPPath);
-        }
+        removePathWithoutFollowingReparsePoints(runtimeBPPath);
     }
 
     // 清理运行时资源包目录
     void cleanRuntimeResourcePacks() {
         auto runtimeRPPath = getResourcePacksPath();
-        if (std::filesystem::is_directory(runtimeRPPath)) {
-            std::filesystem::remove_all(runtimeRPPath);
-        }
+        removePathWithoutFollowingReparsePoints(runtimeRPPath);
     }
 
     // 同时清理双pack目录

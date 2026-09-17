@@ -2,6 +2,8 @@
 
 本仓库的 `main` 跟随官方 `GitHub-Zero123/MCDevTool`，`rcm` 保存 MCDK Hub、日志采集和自动化测试所需的兼容修改。不要直接在 `main` 上开发 RCM 补丁。
 
+当前 RCM 兼容版本的功能与安全修复见 [v1.6.2 更新日志：MCDK Hub 截图与 Windows 构建兼容](release-notes-mcdk-hub-capture.md)。
+
 ## 同步官方
 
 1. 在 GitHub 或 GitHub Desktop 中获取 `upstream/main` 的最新提交，并让本地 `main` 与其一致。

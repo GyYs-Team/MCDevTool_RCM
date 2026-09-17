@@ -27,6 +27,11 @@ target_compile_features(captureTest PRIVATE cxx_std_23)
 target_link_libraries(captureTest PRIVATE mcdevtool)
 
 if(WIN32)
+    add_executable(runtime_pack_cleanup_test runtime_pack_cleanup_test.cpp)
+    target_compile_features(runtime_pack_cleanup_test PRIVATE cxx_std_23)
+    target_link_libraries(runtime_pack_cleanup_test PRIVATE mcdevtool)
+    add_test(NAME runtime-pack-cleanup COMMAND runtime_pack_cleanup_test)
+
     add_executable(ipc_json_test ipc_json_test.cpp)
     target_compile_features(ipc_json_test PRIVATE cxx_std_23)
     target_link_libraries(ipc_json_test PRIVATE mcdevtool ws2_32)
