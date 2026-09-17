@@ -44,11 +44,19 @@ namespace {
     void readPipeThread(
         HANDLE pipe,
         bool filterPython,
-        const mcdk::detail::LineHandler& processLine
+        const mcdk::detail::LineHandler& processLine,
+        const std::function<bool()>& pythonLineSuppressionPredicate
     ) {
         constexpr DWORD bufferSize = 4096;
         std::string lineBuffer;
         std::vector<char> buffer(bufferSize);
+        auto dispatchLine = [&](std::string line) {
+            if (line.find("[Python] ") != std::string::npos && pythonLineSuppressionPredicate
+                && pythonLineSuppressionPredicate()) {
+                return;
+            }
+            processLine(std::move(line));
+        };
 
         while (true) {
             DWORD bytesRead = 0;
@@ -62,7 +70,7 @@ namespace {
                             lastLine.pop_back();
                         }
                         if (!(filterPython && lastLine.find("[Python] ") == std::string::npos)) {
-                            processLine(std::move(lastLine));
+                            dispatchLine(std::move(lastLine));
                         }
                         lineBuffer.clear();
                     }
@@ -78,14 +86,14 @@ namespace {
                         lastLine.pop_back();
                     }
                     if (!(filterPython && lastLine.find("[Python] ") == std::string::npos)) {
-                        processLine(std::move(lastLine));
+                        dispatchLine(std::move(lastLine));
                     }
                     lineBuffer.clear();
                 }
                 break;
             }
 
-            processBufferAppend(lineBuffer, buffer.data(), bytesRead, filterPython, processLine);
+            processBufferAppend(lineBuffer, buffer.data(), bytesRead, filterPython, dispatchLine);
         }
     }
 }
@@ -181,10 +189,23 @@ namespace mcdk::detail {
         HANDLE stderrPipe,
         bool filterPython,
         const LineHandler& stdoutCallback,
-        const LineHandler& stderrCallback
+        const LineHandler& stderrCallback,
+        std::function<bool()> pythonLineSuppressionPredicate
     ) {
-        mStdout = std::thread(readPipeThread, stdoutPipe, filterPython, stdoutCallback);
-        mStderr = std::thread(readPipeThread, stderrPipe, filterPython, stderrCallback);
+        mStdout = std::thread(
+            readPipeThread,
+            stdoutPipe,
+            filterPython,
+            stdoutCallback,
+            pythonLineSuppressionPredicate
+        );
+        mStderr = std::thread(
+            readPipeThread,
+            stderrPipe,
+            filterPython,
+            stderrCallback,
+            std::move(pythonLineSuppressionPredicate)
+        );
     }
 
     void PipeReaderThreads::join() {

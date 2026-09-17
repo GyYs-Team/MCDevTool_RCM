@@ -47,7 +47,8 @@ namespace mcdk::detail {
             HANDLE stderrPipe,
             bool filterPython,
             const LineHandler& stdoutCallback,
-            const LineHandler& stderrCallback
+            const LineHandler& stderrCallback,
+            std::function<bool()> pythonLineSuppressionPredicate = {}
         );
         void join();
 

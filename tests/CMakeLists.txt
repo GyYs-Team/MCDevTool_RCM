@@ -32,6 +32,12 @@ if(WIN32)
     target_link_libraries(ipc_json_test PRIVATE mcdevtool ws2_32)
     add_test(NAME ipc-json-and-logs COMMAND ipc_json_test)
 
+    add_executable(game_process_logging_test game_process_logging_test.cpp)
+    target_compile_features(game_process_logging_test PRIVATE cxx_std_23)
+    target_include_directories(game_process_logging_test PRIVATE ${CMAKE_SOURCE_DIR}/tools/mcdk/src)
+    target_link_libraries(game_process_logging_test PRIVATE mcdk_runtime MCDevLink::MCDevLink)
+    add_test(NAME game-process-logging COMMAND game_process_logging_test)
+
     # 需要交互式桌面及可用的 WGC / OpenGL 环境，按需运行。
     add_executable(window_capture_test window_capture_test.cpp)
     target_compile_features(window_capture_test PRIVATE cxx_std_23)

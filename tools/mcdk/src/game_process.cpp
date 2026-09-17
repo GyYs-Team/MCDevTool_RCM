@@ -851,13 +851,15 @@ void mcdk::launchGameExe(
     errWrite.reset();
 
     // ===================== 用户配置后置处理 =====================
+    std::function<bool()> suppressPythonTransportDuplicate;
+    if (debugCapabilityEnabled) {
+        suppressPythonTransportDuplicate = [ipcServer] {
+            return ipcServer->getClientCount() != 0;
+        };
+    }
     if (safaiaReceiver) {
         safaiaReceiver->setLineHandlers(logHandlers.output, logHandlers.traceback);
-        if (debugCapabilityEnabled) {
-            safaiaReceiver->setPythonLineSuppressionPredicate([ipcServer] {
-                return ipcServer->getClientCount() != 0;
-            });
-        }
+        safaiaReceiver->setPythonLineSuppressionPredicate(suppressPythonTransportDuplicate);
     }
     // 是否过滤非Python输出
     bool filterPython = userConfig.includeDebugMod;
@@ -872,7 +874,14 @@ void mcdk::launchGameExe(
     // 启动两个线程并行读取（避免任何死锁）
     PipeReaderThreads pipeReaders;
     if (!useSafaiaLogs) {
-        pipeReaders.start(outRead.get(), errRead.get(), filterPython, logHandlers.output, logHandlers.traceback);
+        pipeReaders.start(
+            outRead.get(),
+            errRead.get(),
+            filterPython,
+            logHandlers.output,
+            logHandlers.traceback,
+            suppressPythonTransportDuplicate
+        );
     }
 
     if (debuggerPort > 0) {

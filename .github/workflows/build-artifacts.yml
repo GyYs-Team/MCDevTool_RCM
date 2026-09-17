@@ -85,8 +85,8 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          cmake --build build --config Release --target ipc_json_test --parallel --verbose
-          ctest --test-dir build -C Release -R ipc-json-and-logs --output-on-failure
+          cmake --build build --config Release --target ipc_json_test game_process_logging_test --parallel --verbose
+          ctest --test-dir build -C Release -R "(ipc-json-and-logs|game-process-logging)" --output-on-failure
 
       - name: Package Windows
         shell: pwsh
