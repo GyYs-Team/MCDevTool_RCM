@@ -1,6 +1,9 @@
 name: Build Test Artifacts
 
 on:
+  push:
+    branches:
+      - rcm
   workflow_dispatch:
     inputs:
       ref:
